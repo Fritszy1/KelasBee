@@ -376,29 +376,28 @@ async function hashPassword(pw){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
-function loadData(){
-    const saved = 
-      localStorage.getItem(STORAGE_KEY);
-  
-  if (saved) {
-    const parsed = JSON.parse(saved);
-    data = Object.assign(JSON.parse(JSON.stringify(defaultData)), parsed);
+async function loadData(){
+  try{
+    const res = localStorage.getItem(STORAGE_KEY);
+    if(res){
+      const parsed = JSON.parse(res);
+      data = Object.assign(JSON.parse(JSON.stringify(defaultData)), parsed);
+    }
+  }catch(e){
+    console.error(e);
   }
-  
   renderAll();
 }
 
-function saveData(){
+async function saveData(){
   gatherFromDOM();
-  data.lastSaved = new
-Date().toLocaleString('id-ID');
+  data.lastSaved = new Date().toLocaleString('id-ID');
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    
-    document.getElementById('footer-updated').textContent = 'Terakhir disimpan: ' + data.lastSaved;
+    document.getElementById('footer-updated').textContent='Terakhir disimpan: '+data.lastSaved;
   }catch(err){
-    console.error('Storage error:', err);
-    alert('Gagal menyimpan. Coba lagi ya.');
+    console.error(err);
+    alert('Gagal menyimpan.');
   }
 }
 
@@ -406,11 +405,15 @@ function gatherFromDOM(){
   data.className = document.getElementById('hero-class-name').textContent.trim();
   data.tagline = document.getElementById('hero-tagline').textContent.trim();
 
-  data.members = Array.from(document.querySelectorAll('.member-card')).map(card=>({
-    id: card.dataset.id,
-    name: card.querySelector('.member-name').textContent.trim(),
-    role: card.querySelector('.member-role').textContent.trim()
-  }));
+  data.members = Array.from(document.querySelectorAll('.member-card')).map(card=>{
+    const imgEl = card.querySelector('.avatar img');
+    return {
+      id: card.dataset.id,
+      name: card.querySelector('.member-name').textContent.trim(),
+      role: card.querySelector('.member-role').textContent.trim(),
+      photo: imgEl ? imgEl.src : null
+    };
+  });
 
   data.announcements = Array.from(document.querySelectorAll('.announce-card')).map(card=>({
     id: card.dataset.id,
@@ -493,20 +496,24 @@ function renderMembers(){
     const card = document.createElement('div');
     card.className='member-card'; card.dataset.id=m.id;
     const initials = m.name.trim().split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const avatarInner = m.photo ? `<img src="${m.photo}" alt="Foto ${m.name}">` : (initials || '?');
     card.innerHTML = `
       <button class="remove-btn" title="Hapus">×</button>
-      <div class="avatar">${initials || '?'}</div>
+      <div class="avatar clickable">${avatarInner}<div class="avatar-hint">Ganti foto</div></div>
       <div class="member-name" contenteditable="false">${m.name}</div>
       <div class="member-role" contenteditable="false">${m.role}</div>
     `;
     card.querySelector('.remove-btn').onclick = ()=>{ data.members = data.members.filter(x=>x.id!==m.id); renderMembers(); applyEditMode(); };
+    card.querySelector('.avatar').onclick = ()=>{
+      if(editMode){ currentUploadTarget={type:'member', id:m.id}; document.getElementById('fileInput').click(); }
+    };
     grid.appendChild(card);
   });
   const addCard = document.createElement('button');
   addCard.className='add-card';
   addCard.textContent='+ Tambah Anggota';
   addCard.onclick = ()=>{
-    data.members.push({id:uid('m'), name:'Nama Siswa', role:'Anggota'});
+    data.members.push({id:uid('m'), name:'Nama Siswa', role:'Anggota', photo:null});
     renderMembers(); applyEditMode();
   };
   grid.appendChild(addCard);
@@ -613,6 +620,7 @@ document.getElementById('fileInput').addEventListener('change', async (e)=>{
   const maxW = (currentUploadTarget && currentUploadTarget.type==='gallery-new') ? 700
              : (currentUploadTarget && currentUploadTarget.type==='schedule') ? 1400
              : (currentUploadTarget && currentUploadTarget.type==='logo') ? 400
+             : (currentUploadTarget && currentUploadTarget.type==='member') ? 300
              : 900;
   const dataUrl = await resizeImage(file, maxW);
   if(currentUploadTarget && currentUploadTarget.type==='hero'){
@@ -624,6 +632,10 @@ document.getElementById('fileInput').addEventListener('change', async (e)=>{
   } else if(currentUploadTarget && currentUploadTarget.type==='logo'){
     data.customLogo = dataUrl;
     renderLogo();
+  } else if(currentUploadTarget && currentUploadTarget.type==='member'){
+    const mem = data.members.find(x=>x.id===currentUploadTarget.id);
+    if(mem){ mem.photo = dataUrl; }
+    renderMembers(); applyEditMode();
   } else if(currentUploadTarget && currentUploadTarget.type==='gallery-new'){
     data.gallery.push({id:uid('g'), src:dataUrl, caption:'Keterangan foto'});
     renderGallery(); applyEditMode();
@@ -639,7 +651,7 @@ document.getElementById('editToggle').addEventListener('click', async ()=>{
       const pw2 = prompt('Ketik ulang kata sandinya untuk konfirmasi:');
       if(pw1 !== pw2){ alert('Kata sandi tidak sama. Coba klik Mode Edit lagi ya.'); return; }
       data.editPasswordHash = await hashPassword(pw1);
-      saveData();
+      await saveData();
       alert('Kata sandi berhasil dibuat. Simpan baik-baik ya!');
     } else {
       const pw = prompt('Masukkan kata sandi untuk masuk mode edit:');
@@ -663,7 +675,7 @@ document.getElementById('passwordBtn').addEventListener('click', async ()=>{
   const pw2 = prompt('Ketik ulang kata sandi baru:');
   if(pw1 !== pw2){ alert('Kata sandi tidak sama, coba lagi.'); return; }
   data.editPasswordHash = await hashPassword(pw1);
-  saveData();
+  await saveData();
   alert('Kata sandi berhasil diganti.');
 });
 
